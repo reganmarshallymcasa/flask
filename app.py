@@ -2,12 +2,15 @@
 # Imports
 #----------------------------------------------------------------------------#
 
-from flask import Flask, render_template, request
+from flask import Flask, render_template, request, redirect, url_for, session
 # from flask.ext.sqlalchemy import SQLAlchemy
 import logging
 from logging import Formatter, FileHandler
 
 import os
+import uuid
+import msal
+import requests
 
 #----------------------------------------------------------------------------#
 # App Config.
@@ -16,6 +19,27 @@ import os
 app = Flask(__name__)
 app.config.from_object('config')
 #db = SQLAlchemy(app)
+
+
+def _build_msal_app(cache=None, authority=None):
+    return msal.ConfidentialClientApplication(
+        app.config['CLIENT_ID'],
+        authority=authority or app.config.get('AUTHORITY'),
+        client_credential=app.config.get('CLIENT_SECRET'),
+        token_cache=cache
+    )
+
+
+def _load_cache():
+    cache = msal.SerializableTokenCache()
+    if session.get('token_cache'):
+        cache.deserialize(session['token_cache'])
+    return cache
+
+
+def _save_cache(cache):
+    if cache.has_state_changed:
+        session['token_cache'] = cache.serialize()
 
 # Automatically tear down SQLAlchemy.
 '''
@@ -55,6 +79,45 @@ def about():
 def login():
     form = LoginForm(request.form)
     return render_template('forms/login.html', form=form)
+
+
+@app.route('/msal_login')
+def msal_login():
+    session['state'] = str(uuid.uuid4())
+    auth_url = _build_msal_app().get_authorization_request_url(
+        app.config['SCOPE'],
+        state=session['state'],
+        redirect_uri=url_for('authorized', _external=True)
+    )
+    return redirect(auth_url)
+
+
+@app.route(app.config['REDIRECT_PATH'])
+def authorized():
+    if request.args.get('state') != session.get('state'):
+        return redirect(url_for('home'))
+    cache = _load_cache()
+    result = _build_msal_app(cache=cache).acquire_token_by_authorization_code(
+        request.args['code'],
+        scopes=app.config['SCOPE'],
+        redirect_uri=url_for('authorized', _external=True)
+    )
+    _save_cache(cache)
+    if 'access_token' in result:
+        session['user'] = result.get('id_token_claims')
+        session['token'] = result['access_token']
+        return redirect(url_for('profile'))
+    return render_template('errors/500.html'), 500
+
+
+@app.route('/profile')
+def profile():
+    token = session.get('token')
+    if not token:
+        return redirect(url_for('login'))
+    from graph_api import get_user_profile
+    data = get_user_profile(token)
+    return render_template('pages/profile.html', result=data)
 
 
 @app.route('/register')
