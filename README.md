@@ -107,10 +107,23 @@ Project Structure
 
 5. Run the development server:
   ```
-  $ python app.py
+ $ python app.py
   ```
 
 6. Navigate to [http://localhost:5000](http://localhost:5000)
+
+### Microsoft Entra Login
+
+This project now includes optional authentication via Microsoft Entra.
+Set the following environment variables before running the app:
+
+```
+export CLIENT_ID=<application-id>
+export CLIENT_SECRET=<client-secret>
+export TENANT_ID=<tenant-id>
+```
+
+With these variables configured you can sign in using the "Sign in with Microsoft" button on the login page. The acquired access token is used for Microsoft Graph API calls.
 
 
 Deploying to Heroku
